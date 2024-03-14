@@ -1,0 +1,552 @@
+---
+title: "POLS4712 Paper 5"
+author: "Sara Hassani"
+date: "2023-04-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+# Formatting options and packages
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE,
+                      error = FALSE, 
+                      message = FALSE, 
+                      fig.align='center', fig.width = 5.0, fig.height = 3) #just for the outline
+
+library(formatR)                # allows to format R code
+library(tidyverse)              # allows for Tidy Verse data-cleaning commands
+
+# Paper specific packages
+library(foreign)                # package allows R to read Stata datasets ("read_dta" command)
+library(ggcorrplot)             # package for correlation matrix plot ("ggcorrplot" command)
+library(psych)                  # package for data analysis ("describe" command)
+library(forecast)               # package needed for time-series analysis
+library(car)
+library(prais)
+library(orcutt)
+library(ecm)
+library(sandwich)
+
+# Set-up
+set.seed(20136)                 #important because allows to trace random procedures 
+rm(list = ls(all = TRUE))       #remove all previous objects 
+
+```
+
+## Flow Chart
+
+![](flow chart.png)
+
+## Data Exploration
+
+#### Data Upload and Cleaning
+
+```{r}
+brut <- read.csv("HDR21-22_Composite_indices_complete_time_series.csv", header = TRUE)
+
+# Focus on Morocco
+morocco <- brut[brut$country == "Morocco",]
+
+# Keep only the variables of interest
+interest <- c("le_","eys_f","gni_pc_f","co2_prod_","pr_f","lfpr_f")
+options <- paste0("^(", paste(interest, collapse = "|"), ")") # to use in grepl() and check for options
+
+names <- colnames(morocco)
+index <- c() # to keep track of which columns to keep
+
+for(i in 1:length(names)){
+    if(grepl(options, names[i])){index <- c(index,i)}
+}
+
+morocco <- morocco[,index]
+
+# Turn the variables into columns with the years in rows
+names <- colnames(morocco)
+
+  # Expected Years of schooling
+index <- c()
+for(i in 1:length(names)){
+    if(grepl("^eys", names[i])){index <- c(index,i)}
+}
+    # Keeping only from 1990 to 2021
+eys <- unlist(unname(as.vector(morocco[,index[1:32]])))
+
+  # Gross national income per capita
+index <- c()
+for(i in 1:length(names)){
+    if(grepl("^gni_pc_f", names[i])){index <- c(index,i)}
+}
+    # Keeping only from 1990 to 2021
+gnipc <- unlist(unname(as.vector(morocco[,index[1:32]])))
+
+  # Women in Parliament 
+index <- c()
+for(i in 1:length(names)){
+    if(grepl("^pr_f", names[i])){index <- c(index,i)}
+}
+    # Keeping only from 1990 to 2021
+pr <- unlist(unname(as.vector(morocco[,index[1:32]])))
+
+  # Women in Labor Force
+index <- c()
+for(i in 1:length(names)){
+    if(grepl("^lfpr_f", names[i])){index <- c(index,i)}
+}
+    # Keeping only from 1990 to 2021
+lfpr <- unlist(unname(as.vector(morocco[,index[1:32]])))
+
+# Fertility rate
+fertility <- read.csv("morocco-population-2023-04-27.csv", sep = ",", header = T)
+fertility$date <- 1950:2100
+
+    # Keeping only from 1990 to 2021
+min <- which(fertility$date == 1990)
+max <- which(fertility$date == 2021)
+rate <- fertility$Births.per.Woman[min:max]
+
+# Foreign Direct Investment
+investment <- read.csv("morocco-foreign-direct-investment.csv", sep = ",", header = T)
+investment$date <- 1970:2021
+
+    # Keeping only from 1990 to 2021
+min <- which(investment$date == 1990)
+fdi <- investment$Inflows[min:nrow(investment)]
+
+# GDP Growth rate
+economic <- read.csv("morocco-economic-growth-rate.csv", sep = ",", header = T)
+economic$date <- 1960:2021
+
+  # Keeping only from 1990 to 2021
+min <- which(economic$date == 1990)
+growth <- economic$Annual...Change[min:nrow(economic)]
+
+# Freedom of Expression
+expression <- read.csv("democracy.csv", sep = ",", header = T)
+  
+  # Keeping only Morocco from 1990 to 2021
+expression <- expression[expression$Entity == "Morocco",]
+min <- which(expression$Year == 1990)
+max <- which(expression$Year == 2021)
+exp <- expression$freeexpr_vdem_owid[min:max]
+
+# Final dataset
+maroc <- data.frame(pr, growth, fdi, exp, rate, lfpr, gnipc, eys)
+maroc$years <- 1990:2021
+
+# Turning all variables into time series model
+  # Non time series
+maroc2 <- maroc
+  # Time series
+for(i in 1:ncol(maroc)){
+  maroc[,i] <- ts(maroc[,i], start = 1990, frequency = 1)
+}
+
+rm(list = setdiff(ls(), c("maroc","maroc2")))
+
+```
+
+#### Data Frequency and Description
+
+##### Table 1 - Frequency Distributions 
+
+Since my data is continuous, I will be using the summary() function.
+
+```{r}
+sum_pr <- unname(summary(maroc$pr))
+sum_growth <- unname(summary(maroc$growth))
+sum_fdi <- unname(summary(maroc$fdi))
+sum_exp <- unname(summary(maroc$exp))
+sum_rate <- unname(summary(maroc$rate))
+sum_lfpr <- unname(summary(maroc$lfpr))
+sum_gnipc <- unname(summary(maroc$gnipc))
+sum_eys <- unname(summary(maroc$eys))
+
+summary <- data.frame(n = rep(nrow(maroc),8),
+                      min = rep(NA,8),
+                      Q1 = rep(NA,8),
+                      median = rep(NA,8),
+                      mean = rep(NA,8),
+                      Q3 = rep(NA,8),
+                      max = rep(NA,8))
+rownames(summary) <- c("pr", "growth", "fdi", "exp", "rate", "lfpr", "gnipc", "eys")
+
+values <- rbind(sum_pr,sum_growth,sum_fdi,sum_exp,sum_rate,sum_lfpr,sum_gnipc,sum_eys)
+summary[,2:7] <- values
+summary
+```
+
+##### Table 2 - Plotting variables over time
+
+```{r}
+plotdfts <- maroc %>%
+  dplyr::select(pr, growth, fdi, exp, rate, lfpr, gnipc, eys, years) %>%
+  gather(key = "variable", value = "value", -years)
+
+# Table 2.A - Plot all variables over time
+ggplot(plotdfts, aes(x = years, y = value)) + 
+  geom_line(aes(color = variable), size = 1) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800", "#10bb00", "#bb1c00", "#bb6d00", "#bb9f00", "#0022bb", "#b200bb")) +
+  theme_minimal() + labs(title = "Independent Variable and Dependent Variable over time")
+
+# Because of the large value of the gnipc data, its scale does not allow to see changes in the other variables. Instead, I will plot all the variables over time but not gnipc.
+plotdfts <- maroc %>%
+  dplyr::select(pr, growth, fdi, exp, rate, lfpr, eys, years) %>%
+  gather(key = "variable", value = "value", -years)
+
+# Table 2.B - Plot all variables over time excpet for gnipc
+ggplot(plotdfts, aes(x = years, y = value)) + 
+  geom_line(aes(color = variable), size = 1) +
+  scale_color_manual(values = c("#00AFBB", "#E7B800", "#10bb00", "#bb6d00", "#bb9f00", "#0022bb", "#b200bb")) +
+  theme_minimal()+ labs(title = "Independent Variable and Dependent Variable over time without gnipc")
+```
+
+#### Table 3 - Correlation Matrix
+
+```{r}
+dfts2 <- maroc[1:(ncol(maroc)-1)]
+
+corr <- round(cor(dfts2, use = "complete.obs"), 2)
+
+ggcorrplot(corr, type = "full", lab = TRUE,
+           outline.col = "white",
+           ggtheme = ggplot2::theme_gray,
+           colors = c("#E46726", "white", "#6D9EC1"), 
+           lab_col = "black", lab_size = 2, 
+           tl.cex = 8, tl.col = "black")
+
+rm(list = setdiff(ls(), c("maroc","maroc2")))
+```
+
+## Data Analysis
+
+### Regression Analysis and Serial Correlation
+
+#### Table 4 - OLS Regression Analysis & Serial Correlation
+
+##### Table 4.A - OLS Regression Model
+
+```{r}
+mod1 <- lm(pr ~ growth + fdi + exp + rate + lfpr + gnipc + eys, data = maroc)
+summary(mod1)
+```
+
+It is quite common for time series data to not exhibit statistical significance under the OLS regression model. This is because time series data often contains autocorrelation (also known as serial correlation), which violates the assumption of independent and identically distributed errors in the OLS regression model.
+
+The coefficient estimates for lfpr and eys are statistically significant.
+
+##### Table 4.B - Derbin-Watson test
+
+```{r}
+dwtest(mod1)
+```
+
+The Durbin-Watson test statistic is of 1.3981. This value is under the Lowerbound for 32 observations and 7 explanatory variables. Therefore, we have enough evidence to reject the null hypothesis. There is evidence of serial correlation.
+
+#### Table 5 - Plotting explanotary variables against response variable to check for serial correlation
+
+```{r}
+# Scatterplots of the dependent variables against the response variables
+plot(maroc2$growth, maroc2$pr)
+plot(maroc2$fdi, maroc2$pr)
+plot(maroc2$exp, maroc2$pr)
+plot(maroc2$rate, maroc2$pr)
+plot(maroc2$lfpr, maroc2$pr)
+plot(maroc2$gnipc, maroc2$pr)
+plot(maroc2$eys, maroc2$pr)
+```
+
+The scatterplots show that the following variables appear not to show a somewhat linear form: fdi, growth, and lfpr.
+
+### Testing for Non-Stationarity of the variables
+
+#### Table 7 - Plotting variables against time to check for non-stationarity
+
+```{r}
+# Table 7.A - Change in Percentage of Women Holding Parliamentary Seats in Morocco over Time
+ggplot(maroc, aes(x = years, y = pr)) + 
+  geom_line() + labs(title = "Change in Percentage of Women Holding Parliamentary Seats in Morocco over Time")
+
+# Table 7.B - Change in GDP growth rate in Morocco over Time
+ggplot(maroc, aes(x = years, y = growth)) + 
+  geom_line() + labs(title = "Change in GDP growth rate in Morocco over Time")
+
+# Table 7.C - Change in FDI inflow in Morocco over Time
+ggplot(maroc, aes(x = years, y = fdi)) + 
+  geom_line() + labs(title = "Change in FDI inflow in Morocco over Time")
+
+# Table 7.D - Change in the Freedom of Expression score in Morocco over Time
+ggplot(maroc, aes(x = years, y = exp)) + 
+  geom_line() + labs(title = "Change in the Freedom of Expression score in Morocco over Time")
+
+# Table 7.E - Change in fertility rate in Morocco over Time
+ggplot(maroc, aes(x = years, y = rate)) + 
+  geom_line() + labs(title = "Change in fertility rate in Morocco over Time")
+
+# Table 7.F - Change in Percentage of Women in the workforce in Morocco over Time
+ggplot(maroc, aes(x = years, y = lfpr)) + 
+  geom_line() + labs(title = "Change in Percentage of Women in the workforce in Morocco over Time")
+
+# Table 7.G - Change in the Gross National Income per capita of women in Morocco over Time 
+ggplot(maroc, aes(x = years, y = gnipc)) + 
+  geom_line() + labs(title = "Change in the Gross National Income per capita of women in Morocco over Time")
+ 
+# Table 7.H - Change in expected years of schooling for women in Morocco over Time
+ggplot(maroc, aes(x = years, y = eys)) + 
+  geom_line() + labs(title = "Change in expected years of schooling for women in Morocco over Time")
+
+```
+
+There is strong evidence of non-stationarity for most of the variables.
+
+#### Table 8 - Checking for stationarity using Autocorrelation Function
+
+```{r}
+Acf(maroc$pr)
+Acf(maroc$growth)
+Acf(maroc$fdi)
+Acf(maroc$exp)
+Acf(maroc$rate)
+Acf(maroc$lfpr)
+Acf(maroc$gnipc)
+Acf(maroc$eys)
+```
+
+#### Table 9 - Checking for stationarity using the Augmmented Dicky-Fueller test
+
+```{r}
+library(tseries)
+dfts <- maroc
+# Creating lagged variables
+dfts$growthlag  <- sapply(1:nrow(dfts), function(x) as.numeric(dfts$growth[x-1]))
+dfts$fdilag  <- sapply(1:nrow(dfts), function(x) dfts$fdi[x-1])
+dfts$explag  <- sapply(1:nrow(dfts), function(x) dfts$exp[x-1])
+dfts$ratelag  <- sapply(1:nrow(dfts), function(x) dfts$rate[x-1])
+dfts$lfprlag  <- sapply(1:nrow(dfts), function(x) dfts$lfpr[x-1])
+dfts$gnipclag  <- sapply(1:nrow(dfts), function(x) dfts$gnipc[x-1])
+dfts$eyslag  <- sapply(1:nrow(dfts), function(x) dfts$eys[x-1])
+
+# turn the value for the first year into NA, as there is no lag it
+dfts[1,10:16]<- NA
+for (i in 1:ncol(dfts)) {
+  dfts[, i] <- as.numeric(dfts[, i])
+}
+
+# Create first differences
+dfts$diffgrowth <- dfts$growth-dfts$growthlag
+dfts$difffdi <- dfts$fdi-dfts$fdilag
+dfts$diffexp <- dfts$exp-dfts$explag
+dfts$diffrate <- dfts$rate-dfts$ratelag
+dfts$difflfpr <- dfts$lfpr-dfts$lfprlag
+dfts$diffgnipc <- dfts$gnipc-dfts$gnipclag
+dfts$diffeys <- dfts$eys-dfts$eyslag
+```
+
+Table 9.A - growth
+```{r}
+  # (a) Regress first difference on the lagged variable
+  mod1 <- lm(diffgrowth ~ growthlag, data = dfts)
+  summary(mod1)
+
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod1)
+
+  # (b) Regress first difference on the lagged variable and the time variable
+  mod2 <- lm(diffgrowth ~ growthlag + years, data = dfts)
+  summary(mod2)
+     
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod2)
+  
+  # (c) Formal test: Augment Dicky-Fueller
+    adf.test(maroc$growth)
+```
+
+Table 9.B - fdi
+```{r}
+  # (a) Regress first difference on the lagged variable
+  mod1 <- lm(difffdi ~ fdilag, data = dfts)
+  summary(mod1)
+
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod1)
+
+  # (b) Regress first difference on the lagged variable and the time variable
+  mod2 <- lm(difffdi ~ fdilag + years, data = dfts)
+  summary(mod2)
+     
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod2)
+  
+  # (c) Formal test: Augment Dicky-Fueller
+    adf.test(maroc$fdi)
+```
+
+Table 9.C - exp
+```{r}
+  # (a) Regress first difference on the lagged variable
+  mod1 <- lm(diffexp ~ explag, data = dfts)
+  summary(mod1)
+
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod1)
+
+  # (b) Regress first difference on the lagged variable and the time variable
+  mod2 <- lm(diffexp ~ explag + years, data = dfts)
+  summary(mod2)
+     
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod2)
+  
+  # (c) Formal test: Augment Dicky-Fueller
+    adf.test(maroc$exp)
+```
+
+Table 9.D - rate
+```{r}
+  # (a) Regress first difference on the lagged variable
+  mod1 <- lm(diffrate ~ ratelag, data = dfts)
+  summary(mod1)
+
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod1)
+
+  # (b) Regress first difference on the lagged variable and the time variable
+  mod2 <- lm(diffrate ~ ratelag + years, data = dfts)
+  summary(mod2)
+     
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod2)
+  
+  # (c) Formal test: Augment Dicky-Fueller
+    adf.test(maroc$rate)
+```
+
+Table 9.E - lfpr
+```{r}
+  # (a) Regress first difference on the lagged variable
+  mod1 <- lm(difflfpr ~ lfprlag, data = dfts)
+  summary(mod1)
+
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod1)
+
+  # (b) Regress first difference on the lagged variable and the time variable
+  mod2 <- lm(difflfpr ~ lfprlag + years, data = dfts)
+  summary(mod2)
+     
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod2)
+  
+  # (c) Formal test: Augment Dicky-Fueller
+    adf.test(maroc$lfpr)
+```
+
+Table 9.F - gnipc
+```{r}
+  # (a) Regress first difference on the lagged variable
+  mod1 <- lm(diffgnipc ~ gnipclag, data = dfts)
+  summary(mod1)
+
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod1)
+
+  # (b) Regress first difference on the lagged variable and the time variable
+  mod2 <- lm(diffgnipc ~ gnipclag + years, data = dfts)
+  summary(mod2)
+     
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod2)
+  
+  # (c) Formal test: Augment Dicky-Fueller
+    adf.test(maroc$gnipc)
+```
+
+Table 9.G - eys
+```{r}
+  # (a) Regress first difference on the lagged variable
+  mod1 <- lm(diffeys ~ eyslag, data = dfts)
+  summary(mod1)
+
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod1)
+
+  # (b) Regress first difference on the lagged variable and the time variable
+  mod2 <- lm(diffeys ~ eyslag + years, data = dfts)
+  summary(mod2)
+     
+    # Durbin-Watson statistic
+    durbinWatsonTest(mod2)
+  
+  # (c) Formal test: Augment Dicky-Fueller
+    adf.test(maroc$eys)
+```
+
+All my variables are non-stationary when tested using the Augmented Dicky-Fueller test, so I need to test for cointegration.
+
+### Table 10 - Testing for Co-Integration between the variables
+
+```{r}
+# Residuals of original regression
+mod4 <- lm(pr ~ growth + fdi + exp + rate + lfpr + gnipc + eys, data = maroc)
+dfts <- maroc
+dfts$res2 <- residuals(mod4)
+
+# Create first difference of residuals
+dfts$res2lag <- sapply(1:nrow(dfts), function(x) dfts$res2[x-1])
+dfts$res2lag <- car::recode(as.numeric(dfts$res2lag), "numeric(0)=NA")
+dfts$difres2 <- dfts$res2-dfts$res2lag
+
+# Create lagged first difference of residuals
+dfts$lagdifres2 <- sapply(1:nrow(dfts), function(x) dfts$difres2[x-1])
+dfts$lagdifres2 <- car::recode(as.numeric(dfts$lagdifres2), "numeric(0)=NA")
+```
+
+##### Table 10.A - Testing for Co-Integration using the first difference of residuals
+
+```{r}
+mod5 <- lm(difres2 ~ res2lag, data = dfts)
+summary(mod5)
+
+# Dicky-Fueller Test
+durbinWatsonTest(mod5)
+```
+
+##### Table 10.B - Testing for Co-Integration, adding the time variable
+
+```{r}
+mod6 <- lm(difres2 ~ res2lag + years, data = dfts)
+summary(mod6)
+
+# Dicky-Fueller Test
+durbinWatsonTest(mod6)
+```
+
+##### Table 10.C - Testing for Co-Integration, adding the lagged first difference of variables
+
+```{r}
+mod7 <- lm(difres2 ~ res2lag + years + lagdifres2, data = dfts)
+summary(mod7)
+
+# Dicky-Fueller Test
+durbinWatsonTest(mod7)
+```
+
+### Table 11 - Correcting for Autocorrelation in the Original OLS
+
+```{r}
+pw <- prais_winsten(pr ~ growth + fdi + exp + rate + lfpr + gnipc + eys, index = 1, data = maroc)
+summary(pw)
+```
+
+### Table 12 - Difference in Differences
+
+```{r}
+# Dummy variable to indicate treatment
+dfts$treated <- ifelse(dfts$years>=2004,1,0)
+
+# DID estimator
+did <- lm(pr ~ (growth + fdi + exp + rate + lfpr + gnipc + eys)*treated, data = dfts)
+summary(did)
+```
+
