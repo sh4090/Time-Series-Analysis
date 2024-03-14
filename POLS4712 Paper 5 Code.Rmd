@@ -1,9 +1,7 @@
----
-title: "POLS4712 Paper 5"
-author: "Sara Hassani"
-date: "2023-04-27"
-output: html_document
----
+
+# What contributes to the increasing representation of women in Moroccan Politics? A time series model
+
+The full written analysis is available on the pdf file.
 
 ```{r setup, include=FALSE}
 # Formatting options and packages
@@ -34,6 +32,16 @@ rm(list = ls(all = TRUE))       #remove all previous objects
 ## Data Exploration
 
 #### Data Upload and Cleaning
+
+Variables List: 
+    pr: percentage of parliamentary seats held by women, a continuous variables with possible values going from 0 to 100%. 
+    lfpr: percentage of women in the workforce, a continuous variable with possible values from 0 to 100%. 
+    rate: fertility rate, which is the number of children per woman ages 15 to 50, to measure motherhood. 
+    gnipc: Gross National Income per capita of women in US dollars, as a proxy to women's wealth in the country.The value is in current dollars.
+    eys: expected years of schooling for women in Morocco
+    fdi: Foreign Direct Investment flows, in current US dollars, in billions. As a proxy for country’s increased integration in globalization
+    growth: GDP growth rate (percentage) as a proxy to economic development 
+    exp: freedom of expression sub-index by V-dem instute, as a proxy to the strength of the democratic region. Ranges from 0 to 1.
 
 ```{r}
 # Uploading World Bank Data
@@ -143,8 +151,6 @@ rm(list = setdiff(ls(), c("maroc","maroc2")))
 #### Data Frequency and Description
 
 ##### Table 1 - Frequency Distributions 
-
-Since my data is continuous, I will be using the summary() function.
 
 ```{r}
 sum_pr <- unname(summary(maroc$pr))
