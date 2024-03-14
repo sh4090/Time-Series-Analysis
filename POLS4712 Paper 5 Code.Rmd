@@ -6,7 +6,6 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-
 # Formatting options and packages
 knitr::opts_chunk$set(echo = TRUE, 
                       warning = FALSE,
@@ -31,18 +30,13 @@ library(sandwich)
 # Set-up
 set.seed(20136)                 #important because allows to trace random procedures 
 rm(list = ls(all = TRUE))       #remove all previous objects 
-
 ```
-
-## Flow Chart
-
-![](flow chart.png)
-
 ## Data Exploration
 
 #### Data Upload and Cleaning
 
 ```{r}
+# Uploading World Bank Data
 brut <- read.csv("HDR21-22_Composite_indices_complete_time_series.csv", header = TRUE)
 
 # Focus on Morocco
