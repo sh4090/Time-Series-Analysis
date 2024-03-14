@@ -1,7 +1,8 @@
 
 # What contributes to the increasing representation of women in Moroccan Politics? A time series model
 
-The full written analysis is available on the pdf file.
+The full written analysis as well as data used is available on this shared drive I created: 
+      https://drive.google.com/drive/folders/1oYe2XfinaNuLRUhvpjFLPB_tyNjyrszi?usp=sharing
 
 ```{r setup, include=FALSE}
 # Formatting options and packages
